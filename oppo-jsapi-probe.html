@@ -179,12 +179,30 @@
     'BrowserDown.queryDownloadState'
   ];
 
-  const ALIAS = [
-    'download','getBrowserInfo','getCommonBrowserInfo','getUserInfo','getUserInfoImmediately',
-    'isApkInstalled','openDeepLink','onSync','queryDownloadState','sharePage',
-    'shareToWeChatFriends','shareToWeChatMoment','shareToQQ','shareToQzone','shareToWeibo',
-    'startLogin','supportMarkDownload'
-  ];
+  // SDK 静态配置表里的全部 107 个方法名（从 heytapBrowserApiBusiness.js 3.4.0 提取）
+  const METHODS = ('fetchToken,fetchPhoneNum,fetchPhoneNumSafe,getKKUserInfo,getUserInfo,'
+    + 'getUserInfoImmediately,isApkInstalled,isLogin,getUserInfoForThirdAsyn,getUserInfoForThirdSyn,'
+    + 'getKKUAV2,getKKUAV3,getKKUA,getSession,setAlarm,createEvent,getAbtCookies,getAVC,getFeedSession,'
+    + 'isNightMode,getSearchEngine,statWebViewEvent,getCommonBrowserInfo,callAlarm,showEvent,jumpGameCenter,'
+    + 'jumpMarketSearch,closeInformationSubmitDialog,showToast,jumpGameBookDetail,getIsBooked,jumpToUserCenter,'
+    + 'openDeepLink,getPictorialSwitchStatus,openPictorialSwitch,sharePage,shareToQQ,shareToQzone,'
+    + 'shareToWeChatFriends,shareToWeChatMoment,shareToWeibo,getVersion,isPlatformInstalled,printDebugLog,'
+    + 'getBrand,download,sync,onSync,supportMarkDownload,queryDownloadState,supportConsoleDownload,'
+    + 'openSetting,openDataBlockActivity,reload,openWifi,openData,setTitle,startLogin,startSignIn,'
+    + 'statLikeClickEvent,statdisLikeClickEvent,isSaveModeOpen,getArticleInfo,onCommentClick,reportArticle,'
+    + 'openMediaPage,onEnterCommentZone,onLeaveCommentZone,jumpToNewsChannel,getIflowHost,'
+    + 'scanImageCollectionHideBar,scanImageCollectionShowBar,onCommentChange,onClickRelatedNews,'
+    + 'statGetCommentsFailType,onRelatedNewsExposured,startComment,closeCommentBox,getChannelType,'
+    + 'setCommentIdAndUser,commentFailType,openCommentPage,switchBigPicMode,onSyncUserInfoResult,'
+    + 'isNeedScaleUpLdImageInSaveMode,isAllowLoadHdImageInSaveMode,confirmAllowLoadHdImageInSaveMode,'
+    + 'clickRelativeSearch,getSubjectActivityInfo,getRelativeSearchData,clickRelatedNews,'
+    + 'onRelativeSearchExpose,getCommentSwitchStatus,onClickMoreSettingBtn,setIFlowCategory,hideMoreButton,'
+    + 'launchCommentReplyPage,onReplyCountChanged,getConfigValue,openDetail,sub,unsub,statExposure,'
+    + 'statRefresh,supportGifAutoPlay,syncSubState,getIFlowHtmlFeature,getBrowserInfo').split(',');
+
+  // 需要二级密钥（level 2）的方法名
+  const L2 = ['download', 'sync', 'onSync', 'supportMarkDownload', 'queryDownloadState',
+    'supportConsoleDownload', 'getBrowserInfo', 'fetchToken', 'fetchPhoneNum'];
 
   const $ = id => document.getElementById(id);
 
@@ -223,87 +241,104 @@
   const LEVEL_TEXT = { 0: '免鉴权', 1: '普通', 2: '需二级密钥', 3: '需超级密钥' };
 
   function renderApis(bridge) {
-    const J = bridge && bridge.__getBridge ? bridge.__getBridge() : null;
-    const list = J && J.heyTapApiList ? J.heyTapApiList : null;
     const box = $('apis');
     box.textContent = '';
+    const J = bridge && bridge.__getBridge ? bridge.__getBridge() : null;
 
-    if (!list || Object.keys(list).length === 0) {
+    if (!J || typeof J.checkApi !== 'function') {
       const p = document.createElement('div');
       p.className = 'hint';
       p.style.cssText = 'color:#791F1F;background:#FCEBEB;padding:10px 12px;border-radius:8px';
-      p.textContent = list
-        ? '接口清单是空的（0 个）。SDK 加载了，但内核没有注入任何能力对象 —— 这台设备上所有 API 都调不了。'
-        : '拿不到 heyTapApiList，退化为逐个 checkApi 探测：';
+      p.textContent = '拿不到 SDK 实例的 checkApi，无法探测。原始结果见底部。';
       box.appendChild(p);
+      RAW.apiSupported = [];
+      return { total: METHODS.length, supported: 0, downloadExposed: false };
+    }
 
+    const ok = [], no = [];
+    METHODS.forEach(name => {
+      let r = false;
+      try { r = J.checkApi(name); } catch (e) { r = false; }
+      if (r) {
+        const lv = (r.level === undefined ? null : +r.level);
+        ok.push({ name, ns: r.callNamespace || r.category || '', level: lv, l2: L2.indexOf(name) > -1, clientCall: !!r.clientCall });
+      } else {
+        no.push(name);
+      }
+    });
+
+    RAW.apiTotal = METHODS.length;
+    RAW.apiSupported = ok.map(x => (x.ns ? x.ns + '.' : '') + x.name + (x.level === null ? '' : ' L' + x.level));
+    RAW.apiUnsupported = no;
+    RAW.heyTapApiCacheSize = Object.keys(J.heyTapApiList || {}).length;
+
+    const dlEntry = ok.find(x => x.name === 'download' && !x.clientCall);
+    const downloadExposed = !!dlEntry;
+    const realCap = ok.filter(x => !x.clientCall);
+
+    const head = document.createElement('div');
+    head.className = 'hint';
+    head.style.cssText = 'margin:0 0 12px;font-weight:500;color:' + (realCap.length ? '#0C447C' : '#791F1F');
+    head.textContent = '探测 ' + METHODS.length + ' 个方法，内核支持 ' + realCap.length + ' 个'
+      + (ok.length - realCap.length ? '（另有 ' + (ok.length - realCap.length) + ' 个是本地代理，不算内核能力）' : '');
+    box.appendChild(head);
+
+    if (ok.length) {
       const t = document.createElement('table');
-      t.innerHTML = '<thead><tr><th>接口</th><th>checkApi</th></tr></thead>';
+      t.innerHTML = '<thead><tr><th>支持的方法</th><th>等级</th></tr></thead>';
       const tb = document.createElement('tbody');
-      ALIAS.forEach(name => {
-        let r = null;
-        try { r = bridge.checkApi ? bridge.checkApi(name) : null; } catch (e) { r = 'error'; }
+      ok.sort((a, b) => (b.l2 - a.l2) || a.name.localeCompare(b.name)).forEach(x => {
         const tr = document.createElement('tr');
         const td1 = document.createElement('td');
         td1.className = 'name';
-        td1.textContent = name;
+        td1.textContent = (x.ns ? x.ns + '.' : '') + x.name;
         const td2 = document.createElement('td');
-        td2.innerHTML = '<span class="tag na">' + (r ? JSON.stringify(r) : 'false') + '</span>';
+        const tag = document.createElement('span');
+        const lv = x.level;
+        tag.className = 'tag ' + ((lv === null || isNaN(lv)) ? 'na' : 'l' + Math.min(lv, 3));
+        tag.textContent = (lv === null || isNaN(lv)) ? '未标注' : ('L' + lv);
+        td2.appendChild(tag);
+        if (x.clientCall) {
+          const c = document.createElement('span');
+          c.className = 'tag';
+          c.style.cssText = 'background:#F1EFE8;color:#5F5E5A;margin-left:6px';
+          c.textContent = '本地代理';
+          td2.appendChild(c);
+        } else if (x.l2) {
+          const w = document.createElement('span');
+          w.className = 'tag';
+          w.style.cssText = 'background:#FCEBEB;color:#791F1F;margin-left:6px';
+          w.textContent = '需密钥';
+          td2.appendChild(w);
+        }
         tr.append(td1, td2);
         tb.appendChild(tr);
       });
       t.appendChild(tb);
       box.appendChild(t);
-      RAW.apiCount = 0;
-      RAW.highLevel = [];
-      return { count: 0, high: 0 };
     }
 
-    const names = Object.keys(list);
-    RAW.apiCount = names.length;
-    RAW.highLevel = names.filter(n => {
-      const it = list[n] || {};
-      return +it.level === 2 || +it.level === 3 || K_LIST.indexOf(n) > -1;
-    });
+    if (no.length) {
+      const d = document.createElement('details');
+      d.style.marginTop = '14px';
+      const s = document.createElement('summary');
+      s.textContent = '不支持的 ' + no.length + ' 个';
+      d.appendChild(s);
+      const p = document.createElement('div');
+      p.className = 'hint';
+      p.style.cssText = 'margin-top:8px;word-break:break-all';
+      p.textContent = no.join('、');
+      d.appendChild(p);
+      box.appendChild(d);
+    }
 
-    const t = document.createElement('table');
-    t.innerHTML = '<thead><tr><th>接口</th><th>等级</th></tr></thead>';
-    const tb = document.createElement('tbody');
+    const note = document.createElement('div');
+    note.className = 'hint';
+    note.textContent = 'heyTapApiList 只是 hasApi 的懒加载缓存（当前 ' + RAW.heyTapApiCacheSize
+      + ' 条），初始为空属正常，不能当判据。以上结果来自逐个 checkApi。';
+    box.appendChild(note);
 
-    names.sort((a, b) => {
-      const la = +((list[a] || {}).level || 0), lb = +((list[b] || {}).level || 0);
-      return lb - la || a.localeCompare(b);
-    }).forEach(name => {
-      const it = list[name] || {};
-      const lv = +it.level;
-      const needsAuth = lv === 2 || lv === 3 || K_LIST.indexOf(name) > -1;
-      const tr = document.createElement('tr');
-      const td1 = document.createElement('td');
-      td1.className = 'name';
-      td1.textContent = name;
-      const td2 = document.createElement('td');
-      const tag = document.createElement('span');
-      tag.className = 'tag ' + (isNaN(lv) ? 'na' : 'l' + Math.min(lv, 3));
-      tag.textContent = isNaN(lv) ? '未标注' : ('L' + lv + ' ' + (LEVEL_TEXT[lv] || ''));
-      td2.appendChild(tag);
-      if (needsAuth) {
-        const w = document.createElement('span');
-        w.className = 'tag';
-        w.style.cssText = 'background:#FCEBEB;color:#791F1F;margin-left:6px';
-        w.textContent = '下载组';
-        td2.appendChild(w);
-      }
-      tr.append(td1, td2);
-      tb.appendChild(tr);
-    });
-    t.appendChild(tb);
-    box.appendChild(t);
-
-    const sum = document.createElement('div');
-    sum.className = 'hint';
-    sum.textContent = '共 ' + names.length + ' 个接口，其中需鉴权 ' + RAW.highLevel.length + ' 个。';
-    box.appendChild(sum);
-    return { count: names.length, high: RAW.highLevel.length };
+    return { total: METHODS.length, supported: realCap.length, downloadExposed, downloadL2: dlEntry ? dlEntry.l2 : false };
   }
 
   function renderSdk(bridge) {
@@ -325,6 +360,7 @@
     box.appendChild(row('initComplete', String(J.initComplete)));
     box.appendChild(row('_authResultCode', J._authResultCode));
     box.appendChild(row('_actualClientAuthCode', J._actualClientAuthCode));
+    box.appendChild(row('heyTapApiList 缓存', Object.keys(J.heyTapApiList || {}).length + ' 条（懒加载，空属正常）'));
   }
 
   function renderEnv(bridge) {
@@ -362,6 +398,14 @@
     });
     RAW.namespaces = found;
 
+    // 最后一道闸：所有 level 2 方法最终都靠它转给内核
+    const sc = window.securityCheck;
+    const scInvoke = !!(sc && typeof sc.invoke === 'function');
+    box.appendChild(row('window.securityCheck', sc ? '存在' : '不存在', sc ? 'ok' : 'no'));
+    box.appendChild(row('securityCheck.invoke', scInvoke ? '是函数' : '不可用', scInvoke ? 'ok' : 'no'));
+    RAW.hasSecurityCheck = !!sc;
+    RAW.securityCheckInvoke = scInvoke;
+
     RAW.bridgeVersion = ver;
     RAW.browserVersionString = bv;
     RAW.browserVersionNum = bvNum;
@@ -394,10 +438,10 @@
     const stats = renderApis(window.adBridge);
 
     const bridge = window.adBridge.__getBridge ? window.adBridge.__getBridge() : null;
-    let dl = null;
+    let dl = false;
     try {
-      dl = bridge && bridge.checkApi ? bridge.checkApi('BrowserDown.download') : null;
-    } catch (e) { dl = 'error'; }
+      dl = (bridge && bridge.checkApi) ? bridge.checkApi('BrowserDown.download') : false;
+    } catch (e) { dl = false; }
     RAW.checkApi_download = dl;
 
     const nsFound = RAW.namespaces || [];
@@ -411,20 +455,25 @@
       conclusion = '这个浏览器 UA 里没有 oppo / heytap / realme / oneplus / nearme 字样，第一道门就没过。结果是：SDK 不装、没有 window.wv、没有下载能力。Chrome / Edge / 夸克 / UC 都是这个结果。';
     } else if (!ok) {
       setVerdict('鉴权失败（readyCode ' + code + '）', '2005 授权过期 / 2006 非 https', '#E24B4A');
-      conclusion = 'SDK 装上了但鉴权没过。如果是你自己带了 key 才会出现这一步；没带 key 还报这个，说明内核有额外策略。';
-    } else if (stats.count === 0) {
-      setVerdict('环境通过，但能力为空', 'readyCode ' + code + '，接口清单 0 个', '#BA7517');
-      conclusion = '第一道门过了（SDK 装上了，window.wv 存在），但内核没注入 BrowserDown 这些能力对象，接口清单是空的。这说明伪造 UA 只能骗过第一道门，第二道门在内核里，网页伪造不了。真机 OPPO 浏览器上这里应该有几十条记录。';
+      conclusion = 'SDK 装上了但鉴权没过。只有你自己带了 key 才会走到这一步。';
+    } else if (stats.supported === 0) {
+      setVerdict('环境通过，但内核没暴露接口', 'readyCode ' + code + '，支持 0 / ' + stats.total, '#BA7517');
+      conclusion = '第一道门过了（SDK 装上、window.wv 存在），但逐个 checkApi 探测下来一个都没过。判断依据看下面「环境」卡片里那五个 window.Browser* —— 如果全是「不存在」，就是这个浏览器内核不向这个页面暴露能力；如果有「存在」但 checkApi 全 false，那是 SDK 版本和内核对不上。';
     } else {
-      setVerdict('权限清单已读取', '共 ' + stats.count + ' 个接口，' + stats.high + ' 个需鉴权', '#1D9E75');
-      if (dl && +dl.level === 2) {
-        conclusion = '下载接口是 level 2（需二级密钥）。本页没带 key，调 BrowserDown.download 会被拦，supportMarkDownload 也一样 —— 这就是「自己写的页面拿不到静默安装」的实证。';
-      } else if (dl && +dl.level < 2) {
-        conclusion = '下载接口 level ' + dl.level + '，居然不需要鉴权 —— 说明这台设备内核版本低于 7001300，走了老逻辑。这种情况现在很少见了。';
+      setVerdict('接口已探明', '内核支持 ' + stats.supported + ' / ' + stats.total, '#1D9E75');
+      if (stats.downloadExposed) {
+        conclusion = '内核暴露了 download（level 2）。但方法存在不等于能调：它会经 __heytapBrowserAuthCheck__ 转给 window.securityCheck.invoke，由内核决定放不放行。';
+        if (!RAW.hasSecurityCheck) {
+          conclusion += ' 你这台 window.securityCheck 不存在，那个转接函数是空操作，调用不会真正落到内核。';
+        } else if (!RAW.securityCheckInvoke) {
+          conclusion += ' 你这台 securityCheck 在，但 invoke 不是函数，等于转不动。';
+        } else {
+          conclusion += ' 你这台 securityCheck.invoke 可用，最终放不放行要看内核。';
+        }
       } else {
-        conclusion = '读到了接口清单，但 checkApi 对 BrowserDown.download 没返回等级。把原始结果发我看。';
+        conclusion = '支持了 ' + stats.supported + ' 个方法，但 download 不在里面 —— 下载能力没有暴露给这个页面。';
       }
-      if (nsFound.length) conclusion += ' 内核对象已注入：' + nsFound.join('、') + '。';
+      if (nsFound.length) conclusion += ' 内核对象：' + nsFound.join('、') + '。';
     }
 
     const c = $('conclusion');
