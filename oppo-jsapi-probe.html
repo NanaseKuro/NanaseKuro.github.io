@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>OPPO JSAPI 权限探针</title>
+<style>
+  :root {
+    --bg: #F5F5F7;
+    --card: #FFFFFF;
+    --line: rgba(0,0,0,.08);
+    --t1: #1C1C1E;
+    --t2: #6E6E73;
+    --t3: #A1A1A6;
+    --ok: #1D9E75;
+    --no: #E24B4A;
+    --warn: #BA7517;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 20px 16px 48px;
+    background: var(--bg); color: var(--t1);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.2px; }
+  .sub { font-size: 13px; color: var(--t2); margin-bottom: 18px; }
+
+  .card {
+    background: var(--card); border-radius: 14px;
+    padding: 16px; margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 600; color: var(--t2);
+    margin: 0 0 12px; letter-spacing: .3px;
+  }
+
+  #verdict { display: flex; align-items: center; gap: 12px; }
+  #dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--t3); flex: 0 0 auto;
+    transition: background .2s cubic-bezier(.32,.72,0,1);
+  }
+  #verdictText { font-size: 17px; font-weight: 600; letter-spacing: -.2px; }
+  #verdictSub { font-size: 13px; color: var(--t2); margin-top: 2px; }
+
+  .row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .row:first-child { padding-top: 0; }
+  .k { font-size: 13px; color: var(--t2); flex: 0 0 auto; }
+  .v {
+    font-family: var(--mono); font-size: 12.5px;
+    text-align: right; word-break: break-all; color: var(--t1);
+  }
+  .v.ok { color: var(--ok); }
+  .v.no { color: var(--no); }
+  .v.warn { color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    font-size: 11px; font-weight: 500; color: var(--t3);
+    text-align: left; padding: 0 0 8px; letter-spacing: .4px;
+    border-bottom: 1px solid var(--line);
+  }
+  th:last-child, td:last-child { text-align: right; }
+  td {
+    font-size: 12.5px; padding: 8px 0;
+    border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td.name { font-family: var(--mono); word-break: break-all; padding-right: 10px; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 500;
+    padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+  }
+  .tag.l0 { background: #EAF3DE; color: #27500A; }
+  .tag.l1 { background: #E6F1FB; color: #0C447C; }
+  .tag.l2 { background: #FCEBEB; color: #791F1F; }
+  .tag.l3 { background: #FBEAF0; color: #4B1528; }
+  .tag.na { background: #F1EFE8; color: #5F5E5A; }
+
+  .hint { font-size: 12px; color: var(--t2); line-height: 1.6; margin-top: 10px; }
+  code {
+    font-family: var(--mono); font-size: 11.5px;
+    background: rgba(0,0,0,.05); padding: 1px 4px; border-radius: 4px;
+  }
+  button {
+    width: 100%; margin-top: 12px; padding: 12px;
+    font: inherit; font-size: 15px; font-weight: 500;
+    color: #fff; background: #1C1C1E; border: 0; border-radius: 10px;
+    transition: opacity .18s cubic-bezier(.32,.72,0,1);
+  }
+  button:active { opacity: .6; }
+  button.ghost {
+    background: transparent; color: var(--t1);
+    border: 1px solid var(--line); margin-top: 8px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 11px; line-height: 1.55;
+    background: #FAFAFA; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; overflow: auto; max-height: 320px; margin: 12px 0 0;
+    white-space: pre-wrap; word-break: break-all; color: var(--t1);
+  }
+  details summary {
+    font-size: 13px; color: var(--t2); cursor: pointer;
+    list-style: none; padding: 4px 0; user-select: none;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "＋ "; color: var(--t3); }
+  details[open] summary::before { content: "－ "; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<h2 class="sr">OPPO 浏览器 JSAPI 权限探针，用于只读检测当前页面可调用的接口等级</h2>
+
+<h1>OPPO JSAPI 权限探针</h1>
+<div class="sub">只读检测，不触发下载、不上报数据</div>
+
+<div class="card">
+  <div id="verdict">
+    <div id="dot"></div>
+    <div>
+      <div id="verdictText">检测中…</div>
+      <div id="verdictSub">正在加载 browser-bridge.js</div>
+    </div>
+  </div>
+  <div id="conclusion" class="hint" style="display:none"></div>
+</div>
+
+<div class="card">
+  <h2>环境</h2>
+  <div id="env"></div>
+</div>
+
+<div class="card">
+  <h2>SDK 内部状态</h2>
+  <div id="sdk"></div>
+  <div class="hint">
+    这些字段直接读自 <code>adBridge.__getBridge()</code>。
+    <code>_authSwichOpen</code> 为真表示内核版本够新、走了鉴权流程。
+  </div>
+</div>
+
+<div class="card">
+  <h2>接口等级清单</h2>
+  <div id="apis"><div class="hint">等待 SDK 就绪…</div></div>
+  <div class="hint">
+    level 0 / 1 免鉴权；level 2 需要二级密钥；level 3 需要超级密钥。
+    下载那一组（<code>BrowserDown.*</code>）全在 level 2。
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>原始结果（可复制给我）</summary>
+    <pre id="raw"></pre>
+    <button class="ghost" id="copyBtn">复制结果</button>
+  </details>
+</div>
+
+<script src="https://adsfs.heytapimage.com/mp/lib/browser/browser-bridge.js"></script>
+<script>
+(function () {
+  const RAW = { ts: new Date().toISOString(), ua: navigator.userAgent, protocol: location.protocol, origin: location.origin };
+
+  const K_LIST = [
+    'BrowserPriv.getBrowserInfo',
+    'BrowserDown.download',
+    'BrowserDown.supportConsoleDownload',
+    'BrowserDown.onSync',
+    'BrowserDown.supportMarkDownload',
+    'BrowserDown.queryDownloadState'
+  ];
+
+  const ALIAS = [
+    'download','getBrowserInfo','getCommonBrowserInfo','getUserInfo','getUserInfoImmediately',
+    'isApkInstalled','openDeepLink','onSync','queryDownloadState','sharePage',
+    'shareToWeChatFriends','shareToWeChatMoment','shareToQQ','shareToQzone','shareToWeibo',
+    'startLogin','supportMarkDownload'
+  ];
+
+  const $ = id => document.getElementById(id);
+
+  function row(k, v, cls) {
+    const d = document.createElement('div');
+    d.className = 'row';
+    const kk = document.createElement('div');
+    kk.className = 'k';
+    kk.textContent = k;
+    const vv = document.createElement('div');
+    vv.className = 'v' + (cls ? ' ' + cls : '');
+    vv.textContent = v === undefined ? '—' : String(v);
+    d.append(kk, vv);
+    return d;
+  }
+
+  function setVerdict(text, sub, color) {
+    $('dot').style.background = color;
+    $('verdictText').textContent = text;
+    $('verdictSub').textContent = sub;
+  }
+
+  function waitReady(timeout) {
+    return new Promise(resolve => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (!window.adBridge) return resolve('no-bridge');
+        if (typeof window.adBridge.readyCode !== 'undefined') return resolve(window.adBridge.readyCode);
+        if (Date.now() - t0 > timeout) return resolve('timeout');
+        setTimeout(tick, 60);
+      };
+      tick();
+    });
+  }
+
+  const LEVEL_TEXT = { 0: '免鉴权', 1: '普通', 2: '需二级密钥', 3: '需超级密钥' };
+
+  function renderApis(bridge) {
+    const J = bridge && bridge.__getBridge ? bridge.__getBridge() : null;
+    const list = J && J.heyTapApiList ? J.heyTapApiList : null;
+    const box = $('apis');
+    box.textContent = '';
+
+    if (!list || Object.keys(list).length === 0) {
+      const p = document.createElement('div');
+      p.className = 'hint';
+      p.style.cssText = 'color:#791F1F;background:#FCEBEB;padding:10px 12px;border-radius:8px';
+      p.textContent = list
+        ? '接口清单是空的（0 个）。SDK 加载了，但内核没有注入任何能力对象 —— 这台设备上所有 API 都调不了。'
+        : '拿不到 heyTapApiList，退化为逐个 checkApi 探测：';
+      box.appendChild(p);
+
+      const t = document.createElement('table');
+      t.innerHTML = '<thead><tr><th>接口</th><th>checkApi</th></tr></thead>';
+      const tb = document.createElement('tbody');
+      ALIAS.forEach(name => {
+        let r = null;
+        try { r = bridge.checkApi ? bridge.checkApi(name) : null; } catch (e) { r = 'error'; }
+        const tr = document.createElement('tr');
+        const td1 = document.createElement('td');
+        td1.className = 'name';
+        td1.textContent = name;
+        const td2 = document.createElement('td');
+        td2.innerHTML = '<span class="tag na">' + (r ? JSON.stringify(r) : 'false') + '</span>';
+        tr.append(td1, td2);
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb);
+      box.appendChild(t);
+      RAW.apiCount = 0;
+      RAW.highLevel = [];
+      return { count: 0, high: 0 };
+    }
+
+    const names = Object.keys(list);
+    RAW.apiCount = names.length;
+    RAW.highLevel = names.filter(n => {
+      const it = list[n] || {};
+      return +it.level === 2 || +it.level === 3 || K_LIST.indexOf(n) > -1;
+    });
+
+    const t = document.createElement('table');
+    t.innerHTML = '<thead><tr><th>接口</th><th>等级</th></tr></thead>';
+    const tb = document.createElement('tbody');
+
+    names.sort((a, b) => {
+      const la = +((list[a] || {}).level || 0), lb = +((list[b] || {}).level || 0);
+      return lb - la || a.localeCompare(b);
+    }).forEach(name => {
+      const it = list[name] || {};
+      const lv = +it.level;
+      const needsAuth = lv === 2 || lv === 3 || K_LIST.indexOf(name) > -1;
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.className = 'name';
+      td1.textContent = name;
+      const td2 = document.createElement('td');
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + (isNaN(lv) ? 'na' : 'l' + Math.min(lv, 3));
+      tag.textContent = isNaN(lv) ? '未标注' : ('L' + lv + ' ' + (LEVEL_TEXT[lv] || ''));
+      td2.appendChild(tag);
+      if (needsAuth) {
+        const w = document.createElement('span');
+        w.className = 'tag';
+        w.style.cssText = 'background:#FCEBEB;color:#791F1F;margin-left:6px';
+        w.textContent = '下载组';
+        td2.appendChild(w);
+      }
+      tr.append(td1, td2);
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    box.appendChild(t);
+
+    const sum = document.createElement('div');
+    sum.className = 'hint';
+    sum.textContent = '共 ' + names.length + ' 个接口，其中需鉴权 ' + RAW.highLevel.length + ' 个。';
+    box.appendChild(sum);
+    return { count: names.length, high: RAW.highLevel.length };
+  }
+
+  function renderSdk(bridge) {
+    const J = bridge && bridge.__getBridge ? bridge.__getBridge() : null;
+    const box = $('sdk');
+    box.textContent = '';
+    if (!J) {
+      box.appendChild(row('__getBridge()', 'null', 'no'));
+      return;
+    }
+    RAW.countedVersion = J.countedVersion;
+    RAW.authSwichOpen = J._authSwichOpen;
+    RAW.authResultCode = J._authResultCode;
+    RAW.actualClientAuthCode = J._actualClientAuthCode;
+    RAW.initComplete = J.initComplete;
+
+    box.appendChild(row('countedVersion', J.countedVersion, J.countedVersion >= 7001300 ? 'ok' : 'warn'));
+    box.appendChild(row('_authSwichOpen', J._authSwichOpen === undefined ? 'undefined（未设置）' : JSON.stringify(J._authSwichOpen), J._authSwichOpen ? 'ok' : 'warn'));
+    box.appendChild(row('initComplete', String(J.initComplete)));
+    box.appendChild(row('_authResultCode', J._authResultCode));
+    box.appendChild(row('_actualClientAuthCode', J._actualClientAuthCode));
+  }
+
+  function renderEnv(bridge) {
+    const box = $('env');
+    box.textContent = '';
+
+    let bv = '—', bvNum = '—';
+    try {
+      bv = bridge.getBrowserVersion ? (bridge.getBrowserVersion() || 'null') : 'no-api';
+      bvNum = bridge.getBrowserVersion ? bridge.getBrowserVersion(true) : '—';
+    } catch (e) { bv = 'error'; }
+
+    let feeds = '—';
+    try { feeds = bridge.getFeedsSdkVersion ? (bridge.getFeedsSdkVersion() || 'null') : 'no-api'; } catch (e) { feeds = 'error'; }
+
+    const ver = bridge.version || '—';
+    const isHttps = location.protocol === 'https:';
+
+    box.appendChild(row('adBridge 版本', ver));
+    box.appendChild(row('UA 版本串', bv, bv === 'null' ? 'warn' : ''));
+    box.appendChild(row('UA 版本数值', bvNum, bvNum === 'null' ? 'warn' : ''));
+    box.appendChild(row('feeds SDK', feeds, feeds === 'null' ? 'warn' : ''));
+    box.appendChild(row('window.wv', window.wv ? '存在' : '不存在', window.wv ? 'ok' : 'no'));
+    box.appendChild(row('HeytapApi', window.HeytapApi ? '存在' : '不存在', window.HeytapApi ? 'ok' : ''));
+    box.appendChild(row('OposApi', window.OposApi ? '存在' : '不存在', window.OposApi ? 'ok' : ''));
+    box.appendChild(row('页面协议', location.protocol, isHttps ? 'ok' : 'warn'));
+
+    // 内核命名空间：这五个对象是浏览器原生能力本体，网页伪造不出来
+    const NS = ['BrowserDown', 'BrowserPriv', 'BrowserWeb', 'BrowserShare', 'BrowserIFlow'];
+    const found = [];
+    NS.forEach(n => {
+      const has = !!window[n];
+      if (has) found.push(n);
+      box.appendChild(row('window.' + n, has ? '存在' : '不存在', has ? 'ok' : 'no'));
+    });
+    RAW.namespaces = found;
+
+    RAW.bridgeVersion = ver;
+    RAW.browserVersionString = bv;
+    RAW.browserVersionNum = bvNum;
+    RAW.feedsSdk = feeds;
+    RAW.hasWv = !!window.wv;
+    RAW.hasHeytapApi = !!window.HeytapApi;
+  }
+
+  async function run() {
+    if (!window.adBridge) {
+      setVerdict('脚本没加载', 'browser-bridge.js 请求失败，检查网络或 CDN 可达性', '#A1A1A6');
+      RAW.error = 'no-adBridge';
+      $('raw').textContent = JSON.stringify(RAW, null, 2);
+      return;
+    }
+
+    // reportError 关闭：否则报错会把整条 URL 传到 cl-data.ads.heytapmobi.com
+    try {
+      window.adBridge.init({ consoleError: true, reportError: false });
+    } catch (e) {
+      RAW.initThrew = String(e);
+    }
+
+    const code = await waitReady(4000);
+    RAW.readyCode = code;
+    const ok = code === 0 || code === 2004 || code === -1;
+
+    renderEnv(window.adBridge);
+    renderSdk(window.adBridge);
+    const stats = renderApis(window.adBridge);
+
+    const bridge = window.adBridge.__getBridge ? window.adBridge.__getBridge() : null;
+    let dl = null;
+    try {
+      dl = bridge && bridge.checkApi ? bridge.checkApi('BrowserDown.download') : null;
+    } catch (e) { dl = 'error'; }
+    RAW.checkApi_download = dl;
+
+    const nsFound = RAW.namespaces || [];
+    let conclusion = '';
+
+    if (code === 'no-bridge') {
+      setVerdict('脚本没加载', 'browser-bridge.js 请求失败', '#A1A1A6');
+      conclusion = 'CDN 不通或被拦截。换个网络再试。';
+    } else if (code === -999) {
+      setVerdict('环境不匹配', 'readyCode -999，SDK 未安装', '#BA7517');
+      conclusion = '这个浏览器 UA 里没有 oppo / heytap / realme / oneplus / nearme 字样，第一道门就没过。结果是：SDK 不装、没有 window.wv、没有下载能力。Chrome / Edge / 夸克 / UC 都是这个结果。';
+    } else if (!ok) {
+      setVerdict('鉴权失败（readyCode ' + code + '）', '2005 授权过期 / 2006 非 https', '#E24B4A');
+      conclusion = 'SDK 装上了但鉴权没过。如果是你自己带了 key 才会出现这一步；没带 key 还报这个，说明内核有额外策略。';
+    } else if (stats.count === 0) {
+      setVerdict('环境通过，但能力为空', 'readyCode ' + code + '，接口清单 0 个', '#BA7517');
+      conclusion = '第一道门过了（SDK 装上了，window.wv 存在），但内核没注入 BrowserDown 这些能力对象，接口清单是空的。这说明伪造 UA 只能骗过第一道门，第二道门在内核里，网页伪造不了。真机 OPPO 浏览器上这里应该有几十条记录。';
+    } else {
+      setVerdict('权限清单已读取', '共 ' + stats.count + ' 个接口，' + stats.high + ' 个需鉴权', '#1D9E75');
+      if (dl && +dl.level === 2) {
+        conclusion = '下载接口是 level 2（需二级密钥）。本页没带 key，调 BrowserDown.download 会被拦，supportMarkDownload 也一样 —— 这就是「自己写的页面拿不到静默安装」的实证。';
+      } else if (dl && +dl.level < 2) {
+        conclusion = '下载接口 level ' + dl.level + '，居然不需要鉴权 —— 说明这台设备内核版本低于 7001300，走了老逻辑。这种情况现在很少见了。';
+      } else {
+        conclusion = '读到了接口清单，但 checkApi 对 BrowserDown.download 没返回等级。把原始结果发我看。';
+      }
+      if (nsFound.length) conclusion += ' 内核对象已注入：' + nsFound.join('、') + '。';
+    }
+
+    const c = $('conclusion');
+    c.textContent = conclusion;
+    c.style.display = 'block';
+
+    const safe = Object.assign({}, RAW);
+    $('raw').textContent = JSON.stringify(safe, null, 2);
+  }
+
+  $('copyBtn').addEventListener('click', async () => {
+    const text = $('raw').textContent || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      $('copyBtn').textContent = '已复制';
+      setTimeout(() => { $('copyBtn').textContent = '复制结果'; }, 1600);
+    } catch (e) {
+      const r = document.createRange();
+      r.selectNodeContents($('raw'));
+      const s = getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      $('copyBtn').textContent = '已选中，手动复制';
+    }
+  });
+
+  run();
+})();
+</script>
+</body>
+</html>
