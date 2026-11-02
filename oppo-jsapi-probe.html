@@ -149,6 +149,18 @@
 </div>
 
 <div class="card">
+  <h2>Level 2 通道测试（只读）</h2>
+  <div class="hint" style="margin:0 0 12px">
+    查一个包名是否已安装。这是 level 2 接口，和 download 走同一条鉴权链，
+    但只读、不下载、不安装，用来确认 <code>securityCheck</code> 放不放行。
+  </div>
+  <input id="pkgInput" value="com.tencent.mm" autocomplete="off" spellcheck="false"
+    style="width:100%;padding:11px 12px;font:13px var(--mono);border:1px solid var(--line);border-radius:9px;background:#FAFAFA;color:var(--t1)" />
+  <button id="l2Btn" style="margin-top:10px">测一次</button>
+  <div id="l2Result" class="hint" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
   <h2>接口等级清单</h2>
   <div id="apis"><div class="hint">等待 SDK 就绪…</div></div>
   <div class="hint">
@@ -483,6 +495,41 @@
     const safe = Object.assign({}, RAW);
     $('raw').textContent = JSON.stringify(safe, null, 2);
   }
+
+  $('l2Btn').addEventListener('click', function () {
+    const box = $('l2Result');
+    const pkg = (($('pkgInput').value || '').trim()) || 'com.tencent.mm';
+    box.textContent = '调用中…';
+    box.style.color = '#6E6E73';
+
+    let done = false;
+    const t0 = Date.now();
+    const finish = (text, color) => {
+      if (done) return;
+      done = true;
+      const ms = Date.now() - t0;
+      box.textContent = text + '（' + ms + 'ms）';
+      box.style.color = color;
+      RAW.l2Probe = { pkg: pkg, result: text, ms: ms };
+      $('raw').textContent = JSON.stringify(RAW, null, 2);
+    };
+
+    if (!window.adBridge || typeof window.adBridge.isApkInstalled !== 'function') {
+      return finish('adBridge.isApkInstalled 不可用', '#E24B4A');
+    }
+
+    setTimeout(() => finish('3 秒无回调 —— 调用没有落到内核', '#BA7517'), 3000);
+
+    try {
+      window.adBridge.isApkInstalled(pkg, function (res) {
+        if (res === true) finish(pkg + ' 已安装 → level 2 通道通', '#1D9E75');
+        else if (res === false) finish(pkg + ' 未安装，但有明确返回 → level 2 通道通', '#1D9E75');
+        else finish('返回 ' + JSON.stringify(res) + ' → 被拦或出错', '#E24B4A');
+      });
+    } catch (e) {
+      finish('抛错：' + (e && e.message), '#E24B4A');
+    }
+  });
 
   $('copyBtn').addEventListener('click', async () => {
     const text = $('raw').textContent || '';
