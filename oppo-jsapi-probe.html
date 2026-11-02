@@ -151,12 +151,13 @@
 <div class="card">
   <h2>Level 2 通道测试（只读）</h2>
   <div class="hint" style="margin:0 0 12px">
-    查一个包名是否已安装。这是 level 2 接口，和 download 走同一条鉴权链，
-    但只读、不下载、不安装，用来确认 <code>securityCheck</code> 放不放行。
+    这些接口和 download 走同一条鉴权链，但只读、不下载、不安装。
+    单看一个返回值分不出「真通」还是「兜底 false」，所以加了一组对照。
   </div>
-  <input id="pkgInput" value="com.tencent.mm" autocomplete="off" spellcheck="false"
+  <input id="pkgInput" value="com.android.settings" autocomplete="off" spellcheck="false"
     style="width:100%;padding:11px 12px;font:13px var(--mono);border:1px solid var(--line);border-radius:9px;background:#FAFAFA;color:var(--t1)" />
-  <button id="l2Btn" style="margin-top:10px">测一次</button>
+  <button id="l2Btn" style="margin-top:10px">测这个包</button>
+  <button id="suiteBtn" style="margin-top:8px;background:#fff;color:var(--t1);border:1px solid var(--line)">跑对照组（4 项）</button>
   <div id="l2Result" class="hint" style="margin-top:12px"></div>
 </div>
 
@@ -496,39 +497,105 @@
     $('raw').textContent = JSON.stringify(safe, null, 2);
   }
 
-  $('l2Btn').addEventListener('click', function () {
+  function callApi(name, args, timeoutMs) {
+    return new Promise(resolve => {
+      let done = false;
+      const t0 = Date.now();
+      const finish = v => { if (!done) { done = true; resolve({ value: v, ms: Date.now() - t0 }); } };
+      setTimeout(() => finish('__timeout__'), timeoutMs || 3000);
+      try {
+        const fn = window.adBridge && window.adBridge[name];
+        if (typeof fn !== 'function') return finish('__missing__');
+        fn.apply(window.adBridge, (args || []).concat([function (res) { finish(res); }]));
+      } catch (e) {
+        finish('__throw__:' + (e && e.message));
+      }
+    });
+  }
+
+  function verdictOf(v) {
+    if (v === '__timeout__') return ['无回调', '#BA7517'];
+    if (v === '__missing__') return ['接口不存在', '#E24B4A'];
+    if (typeof v === 'string' && v.indexOf('__throw__') === 0) return ['抛错', '#E24B4A'];
+    if (v === null || v === undefined) return ['null 被拦', '#E24B4A'];
+    if (v === false) return ['false 存疑', '#BA7517'];
+    if (v === true) return ['true', '#1D9E75'];
+    return ['有数据', '#1D9E75'];
+  }
+
+  function renderProbeRows(rows) {
     const box = $('l2Result');
-    const pkg = (($('pkgInput').value || '').trim()) || 'com.tencent.mm';
-    box.textContent = '调用中…';
-    box.style.color = '#6E6E73';
+    box.textContent = '';
+    const t = document.createElement('table');
+    t.innerHTML = '<thead><tr><th>调用</th><th>结果</th></tr></thead>';
+    const tb = document.createElement('tbody');
+    rows.forEach(r => {
+      const [label, v, ms] = r;
+      const [txt, color] = verdictOf(v);
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.className = 'name';
+      td1.textContent = label;
+      const td2 = document.createElement('td');
+      const span = document.createElement('span');
+      span.style.cssText = 'color:' + color + ';font-size:11.5px;font-family:var(--mono)';
+      span.textContent = txt + (ms ? ' ' + ms + 'ms' : '');
+      td2.appendChild(span);
+      tr.append(td1, td2);
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    box.appendChild(t);
+  }
 
-    let done = false;
-    const t0 = Date.now();
-    const finish = (text, color) => {
-      if (done) return;
-      done = true;
-      const ms = Date.now() - t0;
-      box.textContent = text + '（' + ms + 'ms）';
-      box.style.color = color;
-      RAW.l2Probe = { pkg: pkg, result: text, ms: ms };
-      $('raw').textContent = JSON.stringify(RAW, null, 2);
-    };
+  $('l2Btn').addEventListener('click', async function () {
+    const pkg = (($('pkgInput').value || '').trim()) || 'com.android.settings';
+    $('l2Result').textContent = '调用中…';
+    const r = await callApi('isApkInstalled', [pkg], 3000);
+    renderProbeRows([['isApkInstalled ' + pkg, r.value, r.ms]]);
+    RAW.l2Probe = { pkg: pkg, value: r.value, ms: r.ms };
+    $('raw').textContent = JSON.stringify(RAW, null, 2);
+  });
 
-    if (!window.adBridge || typeof window.adBridge.isApkInstalled !== 'function') {
-      return finish('adBridge.isApkInstalled 不可用', '#E24B4A');
+  $('suiteBtn').addEventListener('click', async function () {
+    $('l2Result').textContent = '依次调用 4 项…';
+    const out = [];
+    out.push(['L1 对照 getCommonBrowserInfo', (await callApi('getCommonBrowserInfo', [], 3000)).value]);
+    const bi = await callApi('getBrowserInfo', [], 3000);
+    out.push(['L2 getBrowserInfo', bi.value]);
+    const s1 = await callApi('isApkInstalled', ['com.android.settings'], 3000);
+    out.push(['L2 isApkInstalled settings（必装）', s1.value]);
+    const s2 = await callApi('isApkInstalled', ['com.tencent.mm'], 3000);
+    out.push(['L2 isApkInstalled 微信', s2.value]);
+
+    const rows = out.map(x => [x[0], x[1], 0]);
+    renderProbeRows(rows);
+
+    const sum = document.createElement('div');
+    sum.className = 'hint';
+    sum.style.cssText = 'margin-top:12px;font-weight:500';
+
+    const l1ok = out[0][1] !== null && out[0][1] !== '__timeout__' && out[0][1] !== '__missing__';
+    const s1true = out[2][1] === true;
+    const s1false = out[2][1] === false;
+
+    if (!l1ok) {
+      sum.style.color = '#E24B4A';
+      sum.textContent = '连 L1 对照都没返回，这个页面的 JSAPI 整体不通，先排查环境。';
+    } else if (s1true) {
+      sum.style.color = '#1D9E75';
+      sum.textContent = '微信或设置返回 true → L2 通道确实打通，内核放行。';
+    } else if (s1false) {
+      sum.style.color = '#BA7517';
+      sum.textContent = 'L1 通、但「必装包」返回 false → isApkInstalled 给的是兜底值，不是真实安装状态。L2 通道算不算通，还得靠 download 本身验证。';
+    } else {
+      sum.style.color = '#E24B4A';
+      sum.textContent = 'L2 调用被拦（null 或超时），securityCheck 没放行。';
     }
+    $('l2Result').appendChild(sum);
 
-    setTimeout(() => finish('3 秒无回调 —— 调用没有落到内核', '#BA7517'), 3000);
-
-    try {
-      window.adBridge.isApkInstalled(pkg, function (res) {
-        if (res === true) finish(pkg + ' 已安装 → level 2 通道通', '#1D9E75');
-        else if (res === false) finish(pkg + ' 未安装，但有明确返回 → level 2 通道通', '#1D9E75');
-        else finish('返回 ' + JSON.stringify(res) + ' → 被拦或出错', '#E24B4A');
-      });
-    } catch (e) {
-      finish('抛错：' + (e && e.message), '#E24B4A');
-    }
+    RAW.suite = out.map(x => ({ api: x[0], value: x[1] }));
+    $('raw').textContent = JSON.stringify(RAW, null, 2);
   });
 
   $('copyBtn').addEventListener('click', async () => {
