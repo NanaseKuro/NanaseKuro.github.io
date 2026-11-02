@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>联盟落地页 iframe 探针</title>
+<style>
+  :root {
+    --bg: #F5F5F7; --card: #FFFFFF; --line: rgba(0,0,0,.08);
+    --t1: #1C1C1E; --t2: #6E6E73; --t3: #A1A1A6;
+    --ok: #1D9E75; --no: #E24B4A; --warn: #BA7517;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 18px 16px 40px; background: var(--bg); color: var(--t1);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.2px; }
+  .sub { font-size: 13px; color: var(--t2); margin-bottom: 16px; }
+  .card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--t2); margin: 0 0 10px; letter-spacing: .3px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .k { font-size: 13px; color: var(--t2); }
+  .v { font-family: var(--mono); font-size: 12.5px; text-align: right; word-break: break-all; }
+  .v.ok { color: var(--ok); } .v.no { color: var(--no); } .v.warn { color: var(--warn); }
+  .hint { font-size: 12px; color: var(--t2); line-height: 1.6; }
+  code { font-family: var(--mono); font-size: 11.5px; background: rgba(0,0,0,.05); padding: 1px 4px; border-radius: 4px; }
+  iframe {
+    width: 100%; height: 620px; border: 0; border-radius: 12px;
+    background: #fff; display: block;
+  }
+  button {
+    width: 100%; padding: 11px; font: inherit; font-size: 14px; font-weight: 500;
+    color: #fff; background: #1C1C1E; border: 0; border-radius: 10px;
+    transition: opacity .18s cubic-bezier(.32,.72,0,1);
+  }
+  button:active { opacity: .6; }
+  button.ghost { background: #fff; color: var(--t1); border: 1px solid var(--line); margin-top: 8px; }
+  #log { font-family: var(--mono); font-size: 11px; line-height: 1.6; max-height: 340px; overflow: auto; }
+  .msg { padding: 8px 0; border-bottom: 1px solid var(--line); word-break: break-all; }
+  .msg:last-child { border-bottom: 0; }
+  .msg .act { color: #0C447C; font-weight: 600; }
+  .msg .t { color: var(--t3); }
+  .empty { color: var(--t3); font-size: 12px; padding: 8px 0; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<h2 class="sr">用 iframe 嵌入 OPPO 联盟落地页，监听其跨域 postMessage 请求</h2>
+
+<h1>联盟落地页 iframe 探针</h1>
+<div class="sub">嵌入落地页 + 监听它对父页面的能力请求</div>
+
+<div class="card">
+  <h2>说明</h2>
+  <div class="hint">
+    跨域下父页面<b>读不到</b> iframe 里的 <code>adBridge</code>、DOM、window，这是浏览器同源策略，绕不过去。
+    但这个页面在 iframe 里会切到 postMessage 模式，把能力请求发给父页面——<b>这部分能收到</b>。
+    收到的请求我不会替它执行，只记录。
+  </div>
+</div>
+
+<div class="card">
+  <h2>加载状态</h2>
+  <div id="status"></div>
+</div>
+
+<div class="card">
+  <h2>落地页</h2>
+  <iframe id="frame" src="https://adsfs.heytapimage.com/mp/app/union/AN/index.html?pkg=com.cgdr.gxyy"
+    referrerpolicy="no-referrer-when-downgrade"></iframe>
+  <button class="ghost" id="openBtn" style="margin-top:10px">在新标签打开原页面（对比用）</button>
+</div>
+
+<div class="card">
+  <h2>来自 iframe 的请求（postMessage）</h2>
+  <div id="log"><div class="empty">等待…在下面的落地页里点一下「下载」，看它会不会发请求过来</div></div>
+</div>
+
+<div class="card">
+  <h2>跨域读取测试</h2>
+  <div class="hint" style="margin-bottom:10px">点一下，证明父页面确实读不到里面的对象。</div>
+  <button id="crossBtn">尝试读 iframe 的 adBridge</button>
+  <div id="crossResult" class="hint" style="margin-top:10px"></div>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const frame = $('frame');
+  const LOG = [];
+  const t0 = Date.now();
+
+  function row(k, v, cls) {
+    const d = document.createElement('div');
+    d.className = 'row';
+    const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('div'); b.className = 'v' + (cls ? ' ' + cls : ''); b.textContent = v;
+    d.append(a, b);
+    return d;
+  }
+
+  function setStatus(loaded, msg, cls) {
+    const box = $('status');
+    box.textContent = '';
+    box.appendChild(row('browser-bridge 环境', /(oppo|nearme|realme|oneplus|heytap)browser/i.test(navigator.userAgent) ? '本文档在 OPPO 系浏览器里' : '本文档不在 OPPO 系浏览器', /(oppo|nearme|realme|oneplus|heytap)browser/i.test(navigator.userAgent) ? 'ok' : 'warn'));
+    box.appendChild(row('页面协议', location.protocol, location.protocol === 'https:' ? 'ok' : 'warn'));
+    box.appendChild(row('iframe 加载', loaded ? msg : '加载中…', cls || ''));
+    box.appendChild(row('父页面 window.BrowserDown', window.BrowserDown ? '存在' : '不存在', window.BrowserDown ? 'ok' : 'no'));
+  }
+
+  setStatus(false);
+
+  frame.addEventListener('load', () => {
+    setStatus(true, '已加载 ' + (Date.now() - t0) + 'ms', 'ok');
+  });
+
+  frame.addEventListener('error', () => {
+    setStatus(true, '加载失败', 'no');
+  });
+
+  window.addEventListener('message', function (e) {
+    if (!/heytapimage\.com$/.test(new URL(e.origin).hostname) && e.origin.indexOf('heytapimage') < 0) return;
+
+    let data = e.data;
+    let text;
+    try { text = typeof data === 'string' ? data : JSON.stringify(data); } catch (_) { text = String(data); }
+
+    const item = { origin: e.origin, raw: text, at: Date.now() - t0 };
+    LOG.push(item);
+
+    const box = $('log');
+    const empty = box.querySelector('.empty');
+    if (empty) empty.remove();
+
+    const div = document.createElement('div');
+    div.className = 'msg';
+    const act = document.createElement('div');
+    act.className = 'act';
+    let actionType = '';
+    try {
+      const obj = typeof data === 'string' ? JSON.parse(data) : data;
+      actionType = obj && (obj.actionType || obj.type) || '';
+    } catch (_) {}
+    act.textContent = actionType || '(无 actionType)';
+    const meta = document.createElement('div');
+    meta.className = 't';
+    meta.textContent = '+' + item.at + 'ms · ' + e.origin;
+    const body = document.createElement('div');
+    body.textContent = text.length > 600 ? text.slice(0, 600) + '…' : text;
+    div.append(act, meta, body);
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  });
+
+  $('crossBtn').addEventListener('click', function () {
+    const box = $('crossResult');
+    const out = [];
+    try {
+      const w = frame.contentWindow;
+      out.push('contentWindow 类型：' + Object.prototype.toString.call(w));
+      try {
+        const href = w.location.href;
+        out.push('location.href 可读：' + href);
+      } catch (err) {
+        out.push('location.href 抛错：' + err.name + '（跨域，预期）');
+      }
+      try {
+        const br = w.adBridge;
+        out.push('adBridge：' + (br ? '读到了' : 'null'));
+      } catch (err) {
+        out.push('adBridge 抛错：' + err.name + '（跨域，预期）');
+      }
+      try {
+        out.push('contentDocument：' + (frame.contentDocument ? '可读' : 'null'));
+      } catch (err) {
+        out.push('contentDocument 抛错：' + err.name);
+      }
+    } catch (err) {
+      out.push('整体抛错：' + err.name + ' ' + err.message);
+    }
+    box.textContent = out.join('\n');
+    box.style.whiteSpace = 'pre-wrap';
+    box.style.color = '#6E6E73';
+  });
+
+  $('openBtn').addEventListener('click', function () {
+    window.open(frame.src, '_blank');
+  });
+
+  window.__probeLog = LOG;
+})();
+</script>
+</body>
+</html>
